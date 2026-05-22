@@ -1,5 +1,6 @@
 {
   "name": "@cluesurf/reed",
+  "description": "A Voicebox Emulator Ф",
   "version": "0.0.0",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -16,9 +17,7 @@
       "default": "./host/*.js"
     }
   },
-  "files": [
-    "host"
-  ],
+  "files": ["host"],
   "scripts": {
     "make": "rm -rf host && tsc && tsc-alias",
     "scan": "concurrently --kill-others \"tsc -w\" \"tsc-alias -w\"",

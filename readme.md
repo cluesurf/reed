@@ -11,7 +11,7 @@
 
 <h3 align='center'>@cluesurf/reed</h3>
 <p align='center'>
-  A Voicebox Emulator θ
+  A Voicebox Emulator Ф
 </p>
 
 <br/>
