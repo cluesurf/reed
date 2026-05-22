@@ -27,6 +27,9 @@ into structured phones, syllables, and utterances, then synthesizes them
 into audio via an articulatory vocal-tract model (Kelly-Lochbaum
 waveguide + LF glottal source) or a Klatt-style formant synthesizer.
 
+_WIP for now, consonants sound terrible atm, but vowels are getting
+there._
+
 The library ships pre-canned phonologies for English, Spanish, Arabic,
 Hindi, and Mandarin, with a full IPA chart mapping for adding others.
 The internal model carries source-offset metadata through every pipeline
