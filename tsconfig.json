@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "module": "ESNext",
+    "target": "ES2022",
+    "lib": ["es2022", "dom"],
+    "outDir": "host",
+    "rootDir": "code",
+    "sourceMap": true,
+    "declaration": true,
+    "moduleResolution": "bundler",
+    "strict": true,
+    "strictNullChecks": true,
+    "esModuleInterop": true,
+    "noUncheckedIndexedAccess": true,
+    "baseUrl": ".",
+    "allowJs": false,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@/*": ["./code/*"]
+    }
+  },
+  "include": ["code/**/*.ts"],
+  "exclude": ["node_modules", "host", "test"]
+}

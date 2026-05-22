@@ -1,0 +1,39 @@
+{
+  "name": "@cluesurf/reed",
+  "version": "0.0.0",
+  "private": true,
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "main": "./host/index.js",
+  "types": "./host/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./host/index.d.ts",
+      "default": "./host/index.js"
+    },
+    "./*": {
+      "types": "./host/*.d.ts",
+      "default": "./host/*.js"
+    }
+  },
+  "files": [
+    "host"
+  ],
+  "scripts": {
+    "make": "rm -rf host && tsc && tsc-alias",
+    "scan": "concurrently --kill-others \"tsc -w\" \"tsc-alias -w\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint --ext .ts ./code --fix"
+  },
+  "dependencies": {
+    "@cluesurf/talk": "^1.7.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "concurrently": "^9.0.0",
+    "tsc-alias": "^1.8.10",
+    "typescript": "^5.4.5",
+    "vitest": "^2.0.0"
+  }
+}
