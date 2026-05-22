@@ -5,9 +5,10 @@
 <br/>
 <br/>
 
+<!--
 <p align='center'>
   <img src='https://github.com/cluesurf/reed/blob/make/view/reed.svg?raw=true' height='256'/>
-</p>
+</p> -->
 
 <h3 align='center'>@cluesurf/reed</h3>
 <p align='center'>
