@@ -21,11 +21,11 @@
 
 ## Overview
 
-Reed parses [Talk](https://github.com/cluesurf/talk)-encoded ASCII
-phonetic input into structured phones, syllables, and utterances, then
-synthesizes them into audio via an articulatory vocal-tract model
-(Kelly-Lochbaum waveguide + LF glottal source) or a Klatt-style formant
-synthesizer.
+Reed is a simple TypeScript library, parsing
+[Talk](https://github.com/cluesurf/talk)-encoded ASCII phonetic input
+into structured phones, syllables, and utterances, then synthesizes them
+into audio via an articulatory vocal-tract model (Kelly-Lochbaum
+waveguide + LF glottal source) or a Klatt-style formant synthesizer.
 
 The library ships pre-canned phonologies for English, Spanish, Arabic,
 Hindi, and Mandarin, with a full IPA chart mapping for adding others.
@@ -40,19 +40,19 @@ engine.
 
 ## Sources
 
-| Algorithm / Technique | Reason | Paper |
-|---|---|---|
-| 2-pole cascade + parallel formant filters | Standard speech-synthesis filter architecture; explicit Hz control over F1-F5 | [Klatt 1980, *Software for a cascade/parallel formant synthesizer*](https://doi.org/10.1121/1.383940) |
-| Adult-male F1/F2/F3 vowel targets | Canonical reference frequencies for the cardinal vowels | [Peterson & Barney 1952, *Control methods used in a study of the vowels*](https://doi.org/10.1121/1.1906875) |
-| Fricative spectral peaks + approximant formant tables | Place-of-articulation acoustic targets per consonant | Stevens 1998, *Acoustic Phonetics* (MIT Press) |
-| Kelly-Lochbaum digital waveguide | Physical vocal-tract wave-propagation model from area functions | Kelly & Lochbaum 1962, *Speech synthesis* |
-| Source-filter decomposition | Conceptual basis for separating the glottal source from the tract filter | Fant 1960, *Acoustic Theory of Speech Production* |
-| Liljencrants-Fant glottal pulse | Parametric voicing-source generation with one shape knob (Rd) | Liljencrants & Fant 1985, LF model (STL-QPSR) |
-| Formant locus theory | F2 transitions as the primary place-of-articulation perceptual cue | [Liberman et al. 1954, *The role of consonant-vowel transitions*](https://doi.org/10.1037/h0054594) |
-| Cosine-on-grid tongue + lip diameter formulas | Practical articulator → cross-section mapping for the tract | [Pink Trombone (Neil Thapen)](https://dood.al/pinktrombone/) |
-| Per-language phoneme inventories | Cross-linguistic phonological reference for inventory definitions | [PHOIBLE](https://phoible.org) |
-| IPA chart consonant + vowel coverage | Verifying Talk's IPA encoding completeness across languages | Ladefoged & Maddieson 1996, *The Sounds of the World's Languages* |
-| Vowel area functions | Anatomically grounded vowel tract shapes for the cardinal vowels | Story 1996, *Vocal tract area functions for an adult male speaker* |
+| Algorithm / Technique                                 | Reason                                                                        | Paper                                                                                                        |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| 2-pole cascade + parallel formant filters             | Standard speech-synthesis filter architecture; explicit Hz control over F1-F5 | [Klatt 1980, _Software for a cascade/parallel formant synthesizer_](https://doi.org/10.1121/1.383940)        |
+| Adult-male F1/F2/F3 vowel targets                     | Canonical reference frequencies for the cardinal vowels                       | [Peterson & Barney 1952, _Control methods used in a study of the vowels_](https://doi.org/10.1121/1.1906875) |
+| Fricative spectral peaks + approximant formant tables | Place-of-articulation acoustic targets per consonant                          | Stevens 1998, _Acoustic Phonetics_ (MIT Press)                                                               |
+| Kelly-Lochbaum digital waveguide                      | Physical vocal-tract wave-propagation model from area functions               | Kelly & Lochbaum 1962, _Speech synthesis_                                                                    |
+| Source-filter decomposition                           | Conceptual basis for separating the glottal source from the tract filter      | Fant 1960, _Acoustic Theory of Speech Production_                                                            |
+| Liljencrants-Fant glottal pulse                       | Parametric voicing-source generation with one shape knob (Rd)                 | Liljencrants & Fant 1985, LF model (STL-QPSR)                                                                |
+| Formant locus theory                                  | F2 transitions as the primary place-of-articulation perceptual cue            | [Liberman et al. 1954, _The role of consonant-vowel transitions_](https://doi.org/10.1037/h0054594)          |
+| Cosine-on-grid tongue + lip diameter formulas         | Practical articulator → cross-section mapping for the tract                   | [Pink Trombone (Neil Thapen)](https://dood.al/pinktrombone/)                                                 |
+| Per-language phoneme inventories                      | Cross-linguistic phonological reference for inventory definitions             | [PHOIBLE](https://phoible.org)                                                                               |
+| IPA chart consonant + vowel coverage                  | Verifying Talk's IPA encoding completeness across languages                   | Ladefoged & Maddieson 1996, _The Sounds of the World's Languages_                                            |
+| Vowel area functions                                  | Anatomically grounded vowel tract shapes for the cardinal vowels              | Story 1996, _Vocal tract area functions for an adult male speaker_                                           |
 
 ## Installation
 
