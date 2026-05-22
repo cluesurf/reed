@@ -33,9 +33,26 @@ The internal model carries source-offset metadata through every pipeline
 stage, so an editor surface can highlight the input span that produced
 any output sample.
 
-Use it as a research tool for articulatory phonology, a teaching aid for
-visualizing speech production, or as the metadata layer in front of a
-mature TTS engine.
+An experimental codebase distilling decades of acoustic-phonetics work
+into a runnable pipeline. Useful as a phonological metadata layer, an
+articulator visualizer, or a starting point in front of a mature TTS
+engine.
+
+## Sources
+
+| Algorithm / Technique | Reason | Paper |
+|---|---|---|
+| 2-pole cascade + parallel formant filters | Standard speech-synthesis filter architecture; explicit Hz control over F1-F5 | [Klatt 1980, *Software for a cascade/parallel formant synthesizer*](https://doi.org/10.1121/1.383940) |
+| Adult-male F1/F2/F3 vowel targets | Canonical reference frequencies for the cardinal vowels | [Peterson & Barney 1952, *Control methods used in a study of the vowels*](https://doi.org/10.1121/1.1906875) |
+| Fricative spectral peaks + approximant formant tables | Place-of-articulation acoustic targets per consonant | Stevens 1998, *Acoustic Phonetics* (MIT Press) |
+| Kelly-Lochbaum digital waveguide | Physical vocal-tract wave-propagation model from area functions | Kelly & Lochbaum 1962, *Speech synthesis* |
+| Source-filter decomposition | Conceptual basis for separating the glottal source from the tract filter | Fant 1960, *Acoustic Theory of Speech Production* |
+| Liljencrants-Fant glottal pulse | Parametric voicing-source generation with one shape knob (Rd) | Liljencrants & Fant 1985, LF model (STL-QPSR) |
+| Formant locus theory | F2 transitions as the primary place-of-articulation perceptual cue | [Liberman et al. 1954, *The role of consonant-vowel transitions*](https://doi.org/10.1037/h0054594) |
+| Cosine-on-grid tongue + lip diameter formulas | Practical articulator → cross-section mapping for the tract | [Pink Trombone (Neil Thapen)](https://dood.al/pinktrombone/) |
+| Per-language phoneme inventories | Cross-linguistic phonological reference for inventory definitions | [PHOIBLE](https://phoible.org) |
+| IPA chart consonant + vowel coverage | Verifying Talk's IPA encoding completeness across languages | Ladefoged & Maddieson 1996, *The Sounds of the World's Languages* |
+| Vowel area functions | Anatomically grounded vowel tract shapes for the cardinal vowels | Story 1996, *Vocal tract area functions for an adult male speaker* |
 
 ## Installation
 
@@ -158,23 +175,34 @@ const wav = encodeWav({ samples, sampleRate: 24_000 })
 writeFileSync('out.wav', wav)
 ```
 
-## Phone Features
+## Testing
 
-Every parsed phone carries a structured `PhoneFeatures` descriptor:
+Run the test suite:
 
-```typescript
-type PhoneFeatures = {
-  kind: 'consonant' | 'vowel'
-  site?: ConsonantSite // bilabial | alveolar | velar | ...
-  mold?: ConsonantMold // plosive | fricative | nasal | ...
-  height?: VowelHeight // close | mid | open | ...
-  backness?: VowelBackness // front | central | back
-  rounded?: boolean
-  voiced?: boolean
-  aspirated?: boolean
-  // ...
-}
+```bash
+pnpm test
 ```
+
+Generate the sample audio files used to validate the synth output:
+
+```bash
+# Per-vowel /i e a o u/ WAVs + a chained version.
+tsx task/make-test-audio.ts
+
+# Per-consonant CV-syllable WAVs (44 consonants × /a/) + chained.
+tsx task/make-test-consonants.ts
+
+# Bundle the WAVs into shareable MP4s (vowels.mp4, consonants.mp4)
+# over still images. Requires ffmpeg on PATH.
+bash task/make-test-video-sample.sh
+```
+
+Outputs land in [`base/test/`](./base/test/):
+
+- `vowel-{i,e,a,o,u,schwa}.wav`
+- `consonant-<slug>.wav` for every IPA consonant
+- `vowels-chained.wav`, `consonants-chained.wav`
+- `vowels.mp4`, `consonants.mp4`
 
 ## License
 
