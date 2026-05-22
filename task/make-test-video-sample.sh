@@ -115,20 +115,13 @@ echo "[make-test-video-sample] wrote $VOWEL_VIDEO"
 # lowercase counterparts.
 
 CONSONANT_SLUGS=(
-  # Plosives
-  p b t d c J-cap k g K-cap glottal-stop
-  # Nasals
-  m M-cap n N-cap q
-  # Fricatives
-  F-cap B-cap f v T-cap D-cap s z sh zh C-cap Z-cap x G-cap X-cap H-cap Q-cap h
-  # Affricates
-  tx dj ch j
-  # Approximants
-  V-cap y w
-  # Laterals
-  l L-cap
-  # Trills
-  r R-cap
+  # Basic English-relevant consonants in spot-check order.
+  # Slugs match the user's Talk convention emitted by
+  # task/make-test-consonants.ts.
+  m n q
+  g d b p t k
+  h s f v z j x c C-cap
+  w l r y
 )
 
 CONSONANT_PATHS=()

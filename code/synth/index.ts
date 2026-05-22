@@ -261,3 +261,24 @@ export {
   type SynthesizeFormantCvInput,
 } from '@/synth/formant-synth'
 export { NoiseSource, type NoiseSourceConfig } from '@/synth/noise-source'
+export { AntiResonator } from '@/synth/anti-resonator'
+export {
+  KlattSource,
+  type KlattSourceAmplitudes,
+  type KlattSourceInputs,
+  type KlattSourceOutputs,
+} from '@/synth/klatt-source'
+export {
+  KLATT_CONSONANTS,
+  buildKlattTrajectory,
+  interpolateKlattFrame,
+  hasKlattSpec,
+  type KlattFrame,
+  type FormantSpec,
+  type ParallelFormantSpec,
+  type SourceMix,
+} from '@/synth/klatt-trajectories'
+export {
+  synthesizeKlattCv,
+  type SynthesizeKlattCvInput,
+} from '@/synth/klatt-synth'

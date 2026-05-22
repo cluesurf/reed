@@ -1,33 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import {
-  synthesizeFormantCv,
-  type SynthesizeFormantCvInput,
-} from '@/synth/formant-synth'
+  synthesizeKlattCv,
+  type SynthesizeKlattCvInput,
+} from '@/synth/klatt-synth'
 
 /**
  * Top-level CV-syllable renderer.
  *
- * As of the formant-synthesis pivot, this delegates to
- * `synthesizeFormantCv` — a Klatt-style source + parallel-
- * cascade formant filter bank. Formant trajectories are
- * specified directly in Hz per consonant from acoustic
- * phonetics literature, rather than emerging from a
- * physical articulator simulation.
+ * Implements the full Klatt 1980 synthesizer:
+ * cascade + parallel formant banks + anti-resonators +
+ * 6-amplitude source. Rationale and parameter tables
+ * documented in
+ * `note/library/reed/consonant-synthesis-research-plan.md`.
  *
- * Rationale + research background in
- * `note/library/reed/formant-synthesis-pivot.md`.
- *
- * The earlier articulatory consonant synth
- * (`synthesizeArticulatoryCv`) remains in the codebase
- * for reference and future research but is no longer the
- * default rendering path.
+ * Earlier synth backends (`synthesizeArticulatoryCv`,
+ * `synthesizeFormantCv`) remain in the codebase as
+ * reference implementations.
  */
 
-export type SynthesizeConsonantVowelInput = SynthesizeFormantCvInput
+export type SynthesizeConsonantVowelInput = SynthesizeKlattCvInput
 
 export function synthesizeConsonantVowel(
   input: SynthesizeConsonantVowelInput,
 ): Float32Array {
-  return synthesizeFormantCv(input)
+  return synthesizeKlattCv(input)
 }

@@ -51,7 +51,7 @@ describe('synthesizeConsonantVowel', () => {
   it('rejects non-consonant input', () => {
     expect(() =>
       synthesizeConsonantVowel({ consonant: 'a', vowel: 'a' }),
-    ).toThrow(/no formant trajectory|not a consonant/)
+    ).toThrow(/no Klatt parameter|no formant trajectory|not a consonant/)
   })
 
   it('renders different consonants to distinct audio', () => {

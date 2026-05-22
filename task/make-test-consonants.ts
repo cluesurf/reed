@@ -27,72 +27,44 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const OUT_DIR = resolve(HERE, '../base/test')
 
 /**
- * Canonical IPA-chart order for the consonant test files
- * — plosives first (bilabial → glottal), then nasals,
- * fricatives, affricates, approximants, laterals, trills.
+ * Demo consonant set — the 22 basic English-relevant
+ * consonants in spot-check order, using talk.js's
+ * canonical IPA mapping (see deck/talk.js/make/ipa.ts).
  *
- * Naming convention: filename uses a safe ASCII slug
- * (e.g. `'` is named `glottal-stop`, capital letters get
- * a `-cap` suffix to avoid colliding with their lowercase
- * counterparts on case-insensitive filesystems).
+ * Talk symbol → IPA:
+ *   j → /ʒ/, x → /ʃ/, c → /θ/, C → /ð/, q → /ŋ/, y → /j/.
+ *
+ * The Klatt parameter table aliases the canonical talk.js
+ * symbols to the right parameter sets internally.
  */
 
 const CONSONANTS: ReadonlyArray<{ talk: string; slug: string }> = [
-  // Plosives
-  { talk: 'p', slug: 'p' },
-  { talk: 'b', slug: 'b' },
-  { talk: 't', slug: 't' },
-  { talk: 'd', slug: 'd' },
-  { talk: 'c', slug: 'c' },
-  { talk: 'J', slug: 'J-cap' },
-  { talk: 'k', slug: 'k' },
-  { talk: 'g', slug: 'g' },
-  { talk: 'K', slug: 'K-cap' },
-  { talk: "'", slug: 'glottal-stop' },
-  // Nasals
-  { talk: 'm', slug: 'm' },
-  { talk: 'M', slug: 'M-cap' },
-  { talk: 'n', slug: 'n' },
-  { talk: 'N', slug: 'N-cap' },
-  { talk: 'q', slug: 'q' },
-  // Fricatives
-  { talk: 'F', slug: 'F-cap' },
-  { talk: 'B', slug: 'B-cap' },
-  { talk: 'f', slug: 'f' },
-  { talk: 'v', slug: 'v' },
-  { talk: 'T', slug: 'T-cap' },
-  { talk: 'D', slug: 'D-cap' },
-  { talk: 's', slug: 's' },
-  { talk: 'z', slug: 'z' },
-  { talk: 'sh', slug: 'sh' },
-  { talk: 'zh', slug: 'zh' },
-  { talk: 'C', slug: 'C-cap' },
-  { talk: 'Z', slug: 'Z-cap' },
-  { talk: 'x', slug: 'x' },
-  { talk: 'G', slug: 'G-cap' },
-  { talk: 'X', slug: 'X-cap' },
-  { talk: 'H', slug: 'H-cap' },
-  { talk: 'Q', slug: 'Q-cap' },
-  { talk: 'h', slug: 'h' },
-  // Affricates
-  { talk: 'tx', slug: 'tx' },
-  { talk: 'dj', slug: 'dj' },
-  { talk: 'ch', slug: 'ch' },
-  { talk: 'j', slug: 'j' },
-  // Approximants
-  { talk: 'V', slug: 'V-cap' },
-  { talk: 'y', slug: 'y' },
-  { talk: 'w', slug: 'w' },
-  // Laterals
-  { talk: 'l', slug: 'l' },
-  { talk: 'L', slug: 'L-cap' },
-  // Trills
-  { talk: 'r', slug: 'r' },
-  { talk: 'R', slug: 'R-cap' },
+  { talk: 'm', slug: 'm' },     // /m/  bilabial nasal
+  { talk: 'n', slug: 'n' },     // /n/  alveolar nasal
+  { talk: 'q', slug: 'q' },     // /ŋ/  velar nasal
+  { talk: 'g', slug: 'g' },     // /ɡ/  velar voiced stop
+  { talk: 'd', slug: 'd' },     // /d/  alveolar voiced stop
+  { talk: 'b', slug: 'b' },     // /b/  bilabial voiced stop
+  { talk: 'p', slug: 'p' },     // /p/  bilabial voiceless stop
+  { talk: 't', slug: 't' },     // /t/  alveolar voiceless stop
+  { talk: 'k', slug: 'k' },     // /k/  velar voiceless stop
+  { talk: 'h', slug: 'h' },     // /h/  glottal fricative
+  { talk: 's', slug: 's' },     // /s/  alveolar fricative
+  { talk: 'f', slug: 'f' },     // /f/  labiodental fricative
+  { talk: 'v', slug: 'v' },     // /v/  labiodental voiced fric
+  { talk: 'z', slug: 'z' },     // /z/  alveolar voiced fric
+  { talk: 'j', slug: 'j' },     // /ʒ/  postalveolar voiced fric
+  { talk: 'x', slug: 'x' },     // /ʃ/  postalveolar voiceless fric
+  { talk: 'c', slug: 'c' },     // /θ/  voiceless dental fricative
+  { talk: 'C', slug: 'C-cap' }, // /ð/  voiced dental fricative
+  { talk: 'w', slug: 'w' },     // /w/  labio-velar approximant
+  { talk: 'l', slug: 'l' },     // /l/  alveolar lateral
+  { talk: 'r', slug: 'r' },     // /r/  alveolar trill
+  { talk: 'y', slug: 'y' },     // /j/  palatal approximant
 ]
 
 async function main(): Promise<void> {
-  const duration = Number(process.argv[2] ?? '0.6')
+  const duration = Number(process.argv[2] ?? '0.55')
   const frequency = Number(process.argv[3] ?? '130')
   const sampleRate = 24_000
 
