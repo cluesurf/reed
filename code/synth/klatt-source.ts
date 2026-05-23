@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { Glottis } from '@/synth/glottis'
+import { SubglottalFilter } from '@/synth/subglottal'
 
 /**
  * Klatt 1980 source generator.
@@ -65,6 +66,15 @@ export type KlattSourceInputs = {
   tenseness: number
   /** Spectral tilt: dB attenuation at 3 kHz relative to DC. 0-30. */
   tl: number
+  /**
+   * Turbulence noise class. 'obstacle' = peaked spectrum
+   * around 5-7 kHz for sibilants + alveolar/velar stop
+   * bursts. 'channel' = broadband flat for non-sibilants +
+   * bilabial bursts + aspiration. See note/library/reed/
+   * topics/turbulence-noise-generation.md. Defaults to
+   * 'channel'.
+   */
+  noiseType?: 'obstacle' | 'channel'
 }
 
 export type KlattSourceOutputs = {
@@ -84,6 +94,7 @@ export type KlattSourceOutputs = {
 
 export class KlattSource {
   private readonly glottis: Glottis
+  private readonly subglottal: SubglottalFilter
   // Spectral-tilt 1-pole lowpass state. Per Klatt 1980 eq.
   // for TL, this is a one-pole IIR whose cutoff varies
   // with the TL parameter.
@@ -92,13 +103,55 @@ export class KlattSource {
   private lcg = 0xa5a5a5a5
   // Track of glottal cycle phase for the AM modulator.
   private cycleStart = 0
+  // ===== Channel noise filter (non-sibilants /f v θ ð h/
+  // and aspiration). 1-pole LP, mild HF rolloff above
+  // 1500 Hz so noise has natural -6 dB/octave high band
+  // but still significant mid energy.
+  private channelLpState = 0
+  private readonly channelLpAlpha: number
+
+  // ===== Obstacle noise filter (sibilants /s ʃ z ʒ/ and
+  // alveolar/velar stop bursts). Biquad bandpass peaked
+  // around 6 kHz to mimic the teeth-surface noise
+  // concentration. RBJ cookbook BPF coefficients.
+  private obstacleX1 = 0
+  private obstacleX2 = 0
+  private obstacleY1 = 0
+  private obstacleY2 = 0
+  private readonly obstacleB0: number
+  private readonly obstacleB1: number
+  private readonly obstacleB2: number
+  private readonly obstacleA1: number
+  private readonly obstacleA2: number
 
   constructor(public readonly sampleRate: number) {
     this.glottis = new Glottis()
+    this.subglottal = new SubglottalFilter(sampleRate)
+    // Channel-noise filter: 1-pole LP at 1000 Hz. Matches
+    // the previous always-on noise color so non-sibilant
+    // baselines are unchanged.
+    const channelCutoff = 1000
+    this.channelLpAlpha = Math.exp((-2 * Math.PI * channelCutoff) / sampleRate)
+    // Obstacle-noise filter: biquad BPF peaked at 6 kHz,
+    // Q=1.5. RBJ cookbook constant-skirt BPF
+    // (b0 = sin(ω)/2, b1 = 0, b2 = -sin(ω)/2, ...).
+    const obstacleFreq = 6000
+    const obstacleQ = 1.5
+    const omega = (2 * Math.PI * obstacleFreq) / sampleRate
+    const sin = Math.sin(omega)
+    const cos = Math.cos(omega)
+    const alpha = sin / (2 * obstacleQ)
+    const a0 = 1 + alpha
+    this.obstacleB0 = (sin / 2) / a0
+    this.obstacleB1 = 0
+    this.obstacleB2 = (-sin / 2) / a0
+    this.obstacleA1 = (-2 * cos) / a0
+    this.obstacleA2 = (1 - alpha) / a0
   }
 
   process(input: KlattSourceInputs): KlattSourceOutputs {
     const { seconds, frequency, amps, tenseness, tl } = input
+    const noiseType = input.noiseType ?? 'channel'
 
     // Voicing source (LF model).
     const noiseForGlottis = this.nextNoise()
@@ -126,9 +179,51 @@ export class KlattSource {
       this.tiltState = voiced
     }
 
-    // Aperiodic source (white noise for aspiration + frication).
-    const fricNoise = this.nextNoise()
-    const aspNoise = this.nextNoise() * 0.5
+    // Subglottal coupling: notches the source spectrum at
+    // ~600 Hz + ~1500 Hz so the natural-voice antiformants
+    // appear in radiated output. Source-side only — putting
+    // this on the output side would damage F1 of mid vowels.
+    // See note/library/reed/topics/subglottal-coupling.md.
+    voicedTilted = this.subglottal.process(voicedTilted)
+
+    // Aperiodic source — class-aware turbulence noise.
+    // Sibilants (/s ʃ z ʒ tʃ dʒ/ + alveolar/velar stop
+    // bursts) use a bandpass-peaked source ("obstacle"
+    // noise, energy concentrated 5-7 kHz from teeth-
+    // surface effects). Everything else (non-sibilants
+    // + bilabial bursts + aspiration) uses a 1-pole LP
+    // ("channel" noise, broadband). Aspiration always
+    // uses channel-style coloring because its noise is
+    // generated at the glottis and shaped by the
+    // supraglottal cascade.
+    const whiteNoise = this.nextNoise()
+    // Channel path: 1-pole LP.
+    this.channelLpState =
+      (1 - this.channelLpAlpha) * whiteNoise +
+      this.channelLpAlpha * this.channelLpState
+    const channelColored =
+      0.7 * this.channelLpState * 3.0 + 0.3 * whiteNoise
+    // Obstacle path: biquad BPF.
+    const obstacleFiltered =
+      this.obstacleB0 * whiteNoise +
+      this.obstacleB1 * this.obstacleX1 +
+      this.obstacleB2 * this.obstacleX2 -
+      this.obstacleA1 * this.obstacleY1 -
+      this.obstacleA2 * this.obstacleY2
+    this.obstacleX2 = this.obstacleX1
+    this.obstacleX1 = whiteNoise
+    this.obstacleY2 = this.obstacleY1
+    this.obstacleY1 = obstacleFiltered
+    // BPF output is significantly quieter than LP output
+    // because most of the signal is rejected. Boost so
+    // sibilants are loud (real sibilants are 10-15 dB
+    // louder than non-sibilants per Stevens 1998 §11).
+    const obstacleColored = obstacleFiltered * 6.0
+    // Pick the frication-noise spectrum class.
+    const fricNoise =
+      noiseType === 'obstacle' ? obstacleColored : channelColored
+    // Aspiration is always channel-style (cascade-shaped).
+    const aspNoise = channelColored * 0.5
 
     // Glottal phase for frication AM (voiced fricatives).
     // Use the period of the current f0.
@@ -177,6 +272,11 @@ export class KlattSource {
   reset(): void {
     this.tiltState = 0
     this.cycleStart = 0
+    this.channelLpState = 0
+    this.obstacleX1 = 0
+    this.obstacleX2 = 0
+    this.obstacleY1 = 0
+    this.obstacleY2 = 0
   }
 
   private nextNoise(): number {

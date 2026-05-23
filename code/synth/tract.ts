@@ -38,6 +38,14 @@ export type TractConfig = {
   lipReflection?: number
   /** Per-segment loss factor per sample. Defaults to 0.999. */
   segmentLoss?: number
+  /**
+   * Per-segment 1-pole low-pass loss filter coefficient.
+   * y[n] = (1 - α) · x[n] + α · y[n-1].
+   * α ≈ 0.012 gives realistic F3-F5 bandwidth widening
+   * without flattening F1. See note/library/reed/topics/
+   * frequency-dependent-tract-loss.md.
+   */
+  lossAlpha?: number
 }
 
 export class Tract {
@@ -45,12 +53,17 @@ export class Tract {
   private readonly glottisReflection: number
   private readonly lipReflection: number
   private readonly segmentLoss: number
+  private readonly lossAlpha: number
 
   // Traveling wave state.
   readonly right: Float64Array
   readonly left: Float64Array
   private readonly rightJunction: Float64Array
   private readonly leftJunction: Float64Array
+
+  // Per-segment per-direction 1-pole loss filter state.
+  private readonly rightLoss: Float64Array
+  private readonly leftLoss: Float64Array
 
   // Per-junction reflection coefficient + per-segment area.
   readonly diameter: Float64Array
@@ -62,12 +75,15 @@ export class Tract {
     this.glottisReflection = config.glottisReflection ?? 0.75
     this.lipReflection = config.lipReflection ?? -0.85
     this.segmentLoss = config.segmentLoss ?? 0.999
+    this.lossAlpha = config.lossAlpha ?? 0.012
 
     const N = this.length
     this.right = new Float64Array(N)
     this.left = new Float64Array(N)
     this.rightJunction = new Float64Array(N + 1)
     this.leftJunction = new Float64Array(N + 1)
+    this.rightLoss = new Float64Array(N)
+    this.leftLoss = new Float64Array(N)
     this.diameter = new Float64Array(N)
     this.area = new Float64Array(N)
     this.reflection = new Float64Array(N + 1)
@@ -150,10 +166,21 @@ export class Tract {
       this.leftJunction[noiseSegment]! += noiseInput * 0.5
     }
 
-    // Propagate + apply small per-segment loss.
+    // Propagate + apply per-segment loss. Two stages:
+    //   1. Constant loss: y = x · segmentLoss (≈0.999).
+    //   2. Frequency-dependent 1-pole LP per segment per
+    //      direction. Adds extra damping at high
+    //      frequencies, leaving F1 nearly untouched while
+    //      F3-F5 widen toward realistic bandwidths.
+    const a = this.lossAlpha
+    const oneMinusA = 1 - a
     for (let i = 0; i < N; i += 1) {
-      this.right[i] = this.rightJunction[i]! * this.segmentLoss
-      this.left[i] = this.leftJunction[i + 1]! * this.segmentLoss
+      const rIn = this.rightJunction[i]! * this.segmentLoss
+      this.rightLoss[i] = oneMinusA * rIn + a * this.rightLoss[i]!
+      this.right[i] = this.rightLoss[i]!
+      const lIn = this.leftJunction[i + 1]! * this.segmentLoss
+      this.leftLoss[i] = oneMinusA * lIn + a * this.leftLoss[i]!
+      this.left[i] = this.leftLoss[i]!
     }
 
     return this.right[N - 1]!
@@ -176,6 +203,8 @@ export class Tract {
     this.left.fill(0)
     this.rightJunction.fill(0)
     this.leftJunction.fill(0)
+    this.rightLoss.fill(0)
+    this.leftLoss.fill(0)
   }
 
   refreshReflection(): void {

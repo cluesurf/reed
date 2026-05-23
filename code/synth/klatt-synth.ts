@@ -3,6 +3,7 @@
 import { FormantResonator } from '@/synth/formant'
 import { AntiResonator } from '@/synth/anti-resonator'
 import { KlattSource } from '@/synth/klatt-source'
+import { Biquad, buildLowShelfBoostCoeffs } from '@/synth/spectral-shape'
 import {
   buildKlattTrajectory,
   interpolateKlattFrame,
@@ -90,6 +91,8 @@ export function synthesizeKlattCv(input: SynthesizeKlattCvInput): Float32Array {
   ]
   const nasalPole = new FormantResonator(sampleRate)
   const nasalZero = new AntiResonator(sampleRate)
+  const nasalPole2 = new FormantResonator(sampleRate)
+  const nasalZero2 = new AntiResonator(sampleRate)
 
   // Parallel: 5 independent formant filters with their own
   // amplitudes (per Klatt, parallel bank is A2-A6; A1 is
@@ -106,7 +109,12 @@ export function synthesizeKlattCv(input: SynthesizeKlattCvInput): Float32Array {
   const source = new KlattSource(sampleRate)
 
   // Boundary envelope to avoid clicks.
-  const attackSamples = Math.floor(0.005 * sampleRate)
+  // 20 ms attack ramp instead of 5. Softens the onset of
+  // continuant consonants (/h/, fricatives) so they don't
+  // sound like they "click on." Stops still have their
+  // own internal release timing — this ramp is just a
+  // boundary smoother.
+  const attackSamples = Math.floor(0.020 * sampleRate)
   const releaseSamples = Math.floor(0.020 * sampleRate)
 
   // Trill modulator (for /r/ /R/).
@@ -125,6 +133,8 @@ export function synthesizeKlattCv(input: SynthesizeKlattCvInput): Float32Array {
     }
     nasalPole.setFrequencyBandwidth(frame.nasalPole.freq, frame.nasalPole.bw)
     nasalZero.setFrequencyBandwidth(frame.nasalZero.freq, frame.nasalZero.bw)
+    nasalPole2.setFrequencyBandwidth(frame.nasalPole2.freq, frame.nasalPole2.bw)
+    nasalZero2.setFrequencyBandwidth(frame.nasalZero2.freq, frame.nasalZero2.bw)
 
     // Configure parallel formants.
     for (let i = 0; i < parallelFormants.length; i += 1) {
@@ -139,6 +149,7 @@ export function synthesizeKlattCv(input: SynthesizeKlattCvInput): Float32Array {
       amps: frame.source,
       tenseness,
       tl: frame.tl,
+      noiseType: frame.noiseType,
     })
 
     // === Cascade path ===
@@ -151,11 +162,19 @@ export function synthesizeKlattCv(input: SynthesizeKlattCvInput): Float32Array {
     // antiformant.
     let cascadeSample = sourceOut.cascadeInput
     for (const f of cascadeFormants) cascadeSample = f.process(cascadeSample)
-    // Apply nasal pole-zero pair (in series).
+    // Klatt 1980 2-pole/2-zero nasal topology. First pair
+    // zero always in cascade (notch at neutral ~270 Hz);
+    // first pole AN-gated. Second pair both AN-gated via
+    // dry/wet mix so non-nasal frames are bypassed
+    // exactly.
     cascadeSample = nasalZero.process(cascadeSample)
-    // The nasal pole contributes proportionally to AN.
+    const z2 = nasalZero2.process(cascadeSample)
+    const an = frame.source.an
+    cascadeSample = (1 - an) * cascadeSample + an * z2
     const nasalPoleSample = nasalPole.process(cascadeSample)
-    cascadeSample = cascadeSample + frame.source.an * nasalPoleSample
+    const nasalPole2Sample = nasalPole2.process(cascadeSample)
+    cascadeSample =
+      cascadeSample + an * (nasalPoleSample + 0.6 * nasalPole2Sample)
 
     // === Parallel path ===
     // Each formant processes the parallel input separately,
@@ -243,42 +262,36 @@ export function synthesizeKlattCv(input: SynthesizeKlattCvInput): Float32Array {
     }
   }
 
-  // 3. Low-shelf warmth boost — adds body around 250 Hz.
-  // Klatt cascade tends to underweight the low-mid
-  // region because each cascade stage attenuates low
-  // frequencies relative to its formant peak. A gentle
-  // +3 dB shelf below 400 Hz restores natural vocal
-  // warmth.
+  // 2b. Piriform-sinus broadband notch around 4.5 kHz.
+  // Lateral closed-side branches at the larynx contribute
+  // an antiformant around 4.5 kHz in natural voices. The
+  // notch is far from F1-F4 so vowel identity is
+  // preserved, but it cuts the metallic shimmer in the
+  // 4-5 kHz region. See note/library/reed/topics/
+  // piriform-sinuses.md.
   {
-    const corner = 400
-    const gainDb = 3
-    const q = 0.707
-    const A = Math.pow(10, gainDb / 40)
-    const omega = (2 * Math.PI * corner) / sampleRate
-    const cos = Math.cos(omega)
-    const sin = Math.sin(omega)
-    const alpha = sin / (2 * q)
-    const sqrtA2alpha = 2 * Math.sqrt(A) * alpha
-    const b0 = A * (A + 1 - (A - 1) * cos + sqrtA2alpha)
-    const b1 = 2 * A * (A - 1 - (A + 1) * cos)
-    const b2 = A * (A + 1 - (A - 1) * cos - sqrtA2alpha)
-    const a0 = A + 1 + (A - 1) * cos + sqrtA2alpha
-    const a1 = -2 * (A - 1 + (A + 1) * cos)
-    const a2 = A + 1 + (A - 1) * cos - sqrtA2alpha
-    const nb0 = b0 / a0
-    const nb1 = b1 / a0
-    const nb2 = b2 / a0
-    const na1 = a1 / a0
-    const na2 = a2 / a0
-    let x1 = 0, x2 = 0, y1 = 0, y2 = 0
+    const piriform = new AntiResonator(sampleRate)
+    piriform.setFrequencyBandwidth(4500, 800)
     for (let n = 0; n < out.length; n += 1) {
-      const x = out[n]!
-      const y = nb0 * x + nb1 * x1 + nb2 * x2 - na1 * y1 - na2 * y2
-      x2 = x1
-      x1 = x
-      y2 = y1
-      y1 = y
-      out[n] = y
+      out[n] = piriform.process(out[n]!)
+    }
+  }
+
+  // 3. Yielding-wall warmth boost — low-shelf +3 dB below
+  // 250 Hz. Soft-tissue tract walls vibrate sympathetically
+  // with low-frequency pressure, lifting the sub-F1 region
+  // in natural voices. See note/library/reed/topics/
+  // yielding-walls.md.
+  {
+    const shelf = new Biquad(
+      buildLowShelfBoostCoeffs({
+        sampleRate,
+        cornerHz: 250,
+        gainDb: 3,
+      }),
+    )
+    for (let n = 0; n < out.length; n += 1) {
+      out[n] = shelf.process(out[n]!)
     }
   }
 

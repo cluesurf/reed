@@ -51,6 +51,43 @@ describe('Glottis', () => {
     expect(Math.abs(corrPeriod)).toBeGreaterThan(Math.abs(corrHalf))
   })
 
+  it('jitter zero produces deterministic period; jitter non-zero varies it', () => {
+    const sampleRate = 24_000
+    const f0 = 120
+    const measurePeriodVariance = (jitter: number, shimmer: number) => {
+      const g = new Glottis({ jitterRms: jitter, shimmerRms: shimmer })
+      const samples = new Float32Array(sampleRate)
+      for (let n = 0; n < sampleRate; n += 1) {
+        samples[n] = g.process({
+          seconds: n / sampleRate,
+          frequency: f0,
+          intensity: 1,
+          loudness: 1,
+          tenseness: 0.6,
+          noise: 0,
+        })
+      }
+      // Find positive-going zero crossings; spacings approximate periods.
+      const crossings: Array<number> = []
+      for (let n = 1; n < sampleRate; n += 1) {
+        if (samples[n - 1]! <= 0 && samples[n]! > 0) crossings.push(n)
+      }
+      const diffs: Array<number> = []
+      for (let i = 1; i < crossings.length; i += 1) {
+        diffs.push(crossings[i]! - crossings[i - 1]!)
+      }
+      const mean = diffs.reduce((a, b) => a + b, 0) / diffs.length
+      let variance = 0
+      for (const d of diffs) variance += (d - mean) * (d - mean)
+      variance /= diffs.length
+      return variance
+    }
+    const flat = measurePeriodVariance(0, 0)
+    const jittered = measurePeriodVariance(0.02, 0) // 2% to make signal clear
+    // Jittered must have noticeably more period variance than flat.
+    expect(jittered).toBeGreaterThan(flat * 1.5)
+  })
+
   it('amplitude scales roughly with intensity', () => {
     const g1 = new Glottis()
     const g2 = new Glottis()

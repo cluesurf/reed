@@ -14,7 +14,7 @@ describe('LipRadiation', () => {
     expect(Math.abs(last)).toBeLessThan(0.05)
   })
 
-  it('passes mid-band frequencies with reasonable gain', () => {
+  it('passes 500 Hz with modest gain (Klatt single-zero)', () => {
     const r = new LipRadiation({ sampleRate: 24_000 })
     const sampleRate = 24_000
     const freq = 500
@@ -25,17 +25,17 @@ describe('LipRadiation', () => {
       const y = r.process(x)
       if (n > 500 && Math.abs(y) > peak) peak = Math.abs(y)
     }
-    // After HPF (cutoff ~120 Hz) + high-shelf (boost
-    // above 1.5 kHz), 500 Hz is in the flat region with
-    // near-unity gain.
-    expect(peak).toBeGreaterThan(0.7)
-    expect(peak).toBeLessThan(1.2)
+    // |H(f)| = √(1 - 2r·cos(ω) + r²) with r=0.95.
+    // At 500 Hz: ω ≈ 0.131, |H| ≈ 0.18 — substantial
+    // attenuation of low-mid frequencies, by design.
+    expect(peak).toBeGreaterThan(0.1)
+    expect(peak).toBeLessThan(0.4)
   })
 
-  it('boosts high frequencies above the shelf corner', () => {
+  it('boosts HF more than LF (+6 dB/octave slope)', () => {
     const r = new LipRadiation({ sampleRate: 24_000 })
     const sampleRate = 24_000
-    const freq = 3000 // above the 1.5 kHz boost corner
+    const freq = 3000 // π/4 at 24 kHz; well below Nyquist
     let peak = 0
     for (let n = 0; n < sampleRate; n += 1) {
       const t = n / sampleRate
@@ -43,10 +43,12 @@ describe('LipRadiation', () => {
       const y = r.process(x)
       if (n > 500 && Math.abs(y) > peak) peak = Math.abs(y)
     }
-    // +12 dB boost above 1.2 kHz means ~3-4× amplitude
-    // at 3 kHz.
-    expect(peak).toBeGreaterThan(2.0)
-    expect(peak).toBeLessThan(5.0)
+    // |H(f)|² = 1 - 2r·cos(ω) + r². At 3kHz with r=0.95,
+    // cos(π/4)=0.707, so |H|² = 1 - 1.343 + 0.9025 ≈ 0.56,
+    // |H| ≈ 0.75. Substantially higher than the 0.18 at
+    // 500 Hz.
+    expect(peak).toBeGreaterThan(0.5)
+    expect(peak).toBeLessThan(1.0)
   })
 
   it('attenuates very low frequencies', () => {

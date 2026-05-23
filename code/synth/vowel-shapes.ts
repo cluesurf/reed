@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import {
+  STORY_DIAMETERS,
+  resampleDiameters,
+} from '@/synth/data/vowel-area-functions'
+
 /**
  * Vocal-tract diameter shaping for the cardinal vowels.
  *
@@ -68,6 +73,18 @@ export const VOWEL_PRESETS: Record<VowelKey, VowelShape> = {
 
 export function vowelDiameters(vowel: VowelKey, segments = 44): number[] {
   return buildDiameters({ ...VOWEL_PRESETS[vowel], segments })
+}
+
+/**
+ * Story 1996 measured area functions converted to
+ * diameters. Per-vowel anatomically-grounded shapes —
+ * narrow pharynx for /a/, narrow palatal constriction
+ * for /i/, narrow velar + lips for /u/. See note/library/
+ * reed/topics/vocal-tract-area-functions.md.
+ */
+
+export function storyDiameters(vowel: VowelKey, segments = 44): number[] {
+  return resampleDiameters(STORY_DIAMETERS[vowel]!, segments)
 }
 
 export function buildDiameters(input: VowelShape & { segments: number }): number[] {

@@ -54,4 +54,37 @@ describe('Tract', () => {
     for (let i = 0; i < 44; i += 1) sum += Math.abs(t.right[i]!) + Math.abs(t.left[i]!)
     expect(sum).toBe(0)
   })
+
+  it('frequency-dependent loss attenuates high frequency more than low', () => {
+    // Drive a sustained sinusoid into the tract and measure
+    // steady-state amplitude at both LF and HF. The per-segment
+    // 1-pole LP should damp 6 kHz more than 200 Hz.
+    const sampleRate = 24_000
+    const run = (freq: number) => {
+      const t = new Tract({ length: 44 })
+      const totalSamples = sampleRate
+      let peak = 0
+      for (let n = 0; n < totalSamples; n += 1) {
+        const x = Math.sin(2 * Math.PI * freq * (n / sampleRate))
+        const y = t.step(x)
+        if (n > sampleRate * 0.5 && Math.abs(y) > peak) peak = Math.abs(y)
+      }
+      return peak
+    }
+    const peakLow = run(200)
+    const peakHigh = run(6000)
+    // HF must be more attenuated than LF.
+    expect(peakHigh).toBeLessThan(peakLow)
+  })
+
+  it('remains stable for 10 000 random samples', () => {
+    const t = new Tract({ length: 44 })
+    let bad = 0
+    for (let n = 0; n < 10_000; n += 1) {
+      const x = Math.random() * 2 - 1
+      const y = t.step(x)
+      if (!Number.isFinite(y)) bad += 1
+    }
+    expect(bad).toBe(0)
+  })
 })

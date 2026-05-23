@@ -104,6 +104,43 @@ export function buildHighShelfCutCoeffs(input: {
 }
 
 /**
+ * Low-shelf BOOSTING `gainDb` below the corner frequency.
+ * Standard RBJ cookbook formulation. Used to model the
+ * warmth that yielding tract walls add to natural voices.
+ * See note/library/reed/topics/yielding-walls.md.
+ */
+
+export function buildLowShelfBoostCoeffs(input: {
+  sampleRate: number
+  cornerHz: number
+  gainDb: number
+  q?: number
+}): BiquadCoeffs {
+  const { sampleRate, cornerHz, gainDb, q = 0.707 } = input
+  const A = Math.pow(10, gainDb / 40)
+  const omega = (2 * Math.PI * cornerHz) / sampleRate
+  const cos = Math.cos(omega)
+  const sin = Math.sin(omega)
+  const alpha = sin / (2 * q)
+  const sqrtA2alpha = 2 * Math.sqrt(A) * alpha
+
+  const b0 = A * (A + 1 - (A - 1) * cos + sqrtA2alpha)
+  const b1 = 2 * A * (A - 1 - (A + 1) * cos)
+  const b2 = A * (A + 1 - (A - 1) * cos - sqrtA2alpha)
+  const a0 = A + 1 + (A - 1) * cos + sqrtA2alpha
+  const a1 = -2 * (A - 1 + (A + 1) * cos)
+  const a2 = A + 1 + (A - 1) * cos - sqrtA2alpha
+
+  return {
+    b0: b0 / a0,
+    b1: b1 / a0,
+    b2: b2 / a0,
+    a1: a1 / a0,
+    a2: a2 / a0,
+  }
+}
+
+/**
  * Band-stop (notch) with a given depth and Q.
  *
  * `depthDb` is the dip at the center frequency (negative

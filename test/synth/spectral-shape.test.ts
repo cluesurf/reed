@@ -5,6 +5,7 @@ import {
   Biquad,
   SpectralShape,
   buildHighShelfCutCoeffs,
+  buildLowShelfBoostCoeffs,
   buildPeakingNotchCoeffs,
 } from '@/synth/spectral-shape'
 
@@ -79,6 +80,44 @@ describe('high-shelf cut coefficients', () => {
       if (n > 200) peak = Math.max(peak, Math.abs(y))
     }
     // At 500 Hz (well below 6 kHz corner), gain ≈ 0 dB.
+    expect(peak).toBeGreaterThan(0.9)
+    expect(peak).toBeLessThan(1.1)
+  })
+})
+
+describe('low-shelf boost coefficients', () => {
+  it('boosts frequencies below the corner', () => {
+    const coeffs = buildLowShelfBoostCoeffs({
+      sampleRate: 24_000,
+      cornerHz: 250,
+      gainDb: 3,
+    })
+    const b = new Biquad(coeffs)
+    let peak = 0
+    for (let n = 0; n < 24_000; n += 1) {
+      const t = n / 24_000
+      const y = b.process(Math.sin(2 * Math.PI * 100 * t))
+      if (n > 500) peak = Math.max(peak, Math.abs(y))
+    }
+    // +3 dB at 100 Hz (below corner) → ≈ 1.41× input.
+    // Allow tolerance for shelf transition shape.
+    expect(peak).toBeGreaterThan(1.2)
+    expect(peak).toBeLessThan(1.6)
+  })
+
+  it('passes frequencies well above the corner unchanged', () => {
+    const coeffs = buildLowShelfBoostCoeffs({
+      sampleRate: 24_000,
+      cornerHz: 250,
+      gainDb: 3,
+    })
+    const b = new Biquad(coeffs)
+    let peak = 0
+    for (let n = 0; n < 24_000; n += 1) {
+      const t = n / 24_000
+      const y = b.process(Math.sin(2 * Math.PI * 2000 * t))
+      if (n > 500) peak = Math.max(peak, Math.abs(y))
+    }
     expect(peak).toBeGreaterThan(0.9)
     expect(peak).toBeLessThan(1.1)
   })

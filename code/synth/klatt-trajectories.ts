@@ -47,10 +47,29 @@ export type KlattFrame = {
   cascade: FormantSpec[]
   /** Parallel formant positions + amplitudes (A2-A6, A1 typically inactive). */
   parallel: ParallelFormantSpec[]
+  /**
+   * Turbulence noise class. Obstacle = sibilants /s ʃ z ʒ
+   * tʃ dʒ/ + alveolar/velar stop bursts; modeled as a
+   * peaked filter around 5-7 kHz to mimic the teeth-
+   * surface noise concentration. Channel = non-sibilants
+   * /f v θ ð x h/ + bilabial bursts; broader, flatter
+   * distributed-turbulence noise. See note/library/reed/
+   * topics/turbulence-noise-generation.md.
+   */
+  noiseType: 'obstacle' | 'channel'
   /** Nasal pole position (active when source.an > 0). */
   nasalPole: FormantSpec
   /** Nasal zero position (active when source.an > 0). */
   nasalZero: FormantSpec
+  /**
+   * Second nasal pole + zero (Klatt 1980 2-pole/2-zero
+   * nasal topology). Captures the secondary nasal-cavity
+   * resonance + second oral-side-branch antiformant.
+   * Parked at ~5500 Hz for non-nasal frames so it doesn't
+   * color the speech band.
+   */
+  nasalPole2: FormantSpec
+  nasalZero2: FormantSpec
 }
 
 /**
@@ -82,9 +101,9 @@ const VOWEL_TARGETS: Record<VowelKey, VowelTarget> = {
   },
   e: {
     cascade: [
-      { freq: 530, bw: 60 },
-      { freq: 1840, bw: 90 },
-      { freq: 2480, bw: 150 },
+      { freq: 480, bw: 60 },
+      { freq: 1880, bw: 90 },
+      { freq: 2632, bw: 150 },
       { freq: 3500, bw: 200 },
       { freq: 4500, bw: 200 },
     ],
@@ -102,9 +121,9 @@ const VOWEL_TARGETS: Record<VowelKey, VowelTarget> = {
   },
   o: {
     cascade: [
-      { freq: 570, bw: 60 },
-      { freq: 840, bw: 90 },
-      { freq: 2410, bw: 150 },
+      { freq: 555, bw: 60 },
+      { freq: 819, bw: 90 },
+      { freq: 2400, bw: 150 },
       { freq: 3400, bw: 200 },
       { freq: 4500, bw: 200 },
     ],
@@ -148,6 +167,11 @@ const VOWEL_SOURCE: SourceMix = {
 
 const VOWEL_NASAL_POLE: FormantSpec = { freq: 270, bw: 200 }
 const VOWEL_NASAL_ZERO: FormantSpec = { freq: 270, bw: 200 }
+// Second nasal pole + zero parked well above the speech
+// band so non-nasal frames are not colored. Per-nasal
+// values override these in the table below.
+const VOWEL_NASAL_POLE2: FormantSpec = { freq: 5500, bw: 200 }
+const VOWEL_NASAL_ZERO2: FormantSpec = { freq: 5500, bw: 200 }
 
 /**
  * Per-consonant Klatt parameter spec.
@@ -170,6 +194,15 @@ type KlattConsonantSpec = {
   // an=0 and the pole-zero is dormant.
   nasalPole: FormantSpec
   nasalZero: FormantSpec
+  // Second nasal pole + zero (Klatt 1980 enhanced
+  // topology). For non-nasals these sit at 5500 Hz.
+  nasalPole2: FormantSpec
+  nasalZero2: FormantSpec
+
+  // Turbulence noise class — obstacle (sibilants + alveolar/
+  // velar bursts) or channel (non-sibilants + bilabial
+  // bursts). Optional; defaults to 'channel'.
+  noiseType?: 'obstacle' | 'channel'
 
   // Source amplitude mix during the consonant hold.
   source: SourceMix
@@ -187,6 +220,26 @@ type KlattConsonantSpec = {
   // lives.
   burstSource?: SourceMix
   burstTl?: number
+
+  // Voice quality preset. Defaults to 'modal'. 'lax' for
+  // voiced fricatives (slightly softer source). 'breathy'
+  // for /h/. See note/library/reed/topics/voice-quality-
+  // dimensions.md.
+  voiceQuality?: 'pressed' | 'modal' | 'lax' | 'breathy'
+}
+
+/**
+ * Quality preset → (TL adjustment in dB, aspiration boost
+ * multiplier). Per Klatt & Klatt 1990 Table V.
+ */
+const VOICE_QUALITY_ADJUST: Record<
+  'pressed' | 'modal' | 'lax' | 'breathy',
+  { tlAdjust: number; ahBoost: number }
+> = {
+  pressed: { tlAdjust: 0, ahBoost: 0 },
+  modal: { tlAdjust: 0, ahBoost: 0 },
+  lax: { tlAdjust: 4, ahBoost: 0 },
+  breathy: { tlAdjust: 18, ahBoost: 0.3 },
 }
 
 const SILENT_SOURCE: SourceMix = {
@@ -259,6 +312,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: SILENT_SOURCE,
     tl: 0,
     holdDuration: 0.10,
@@ -290,6 +345,9 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
+    noiseType: 'obstacle',
     source: SILENT_SOURCE,
     tl: 0,
     holdDuration: 0.10,
@@ -306,30 +364,64 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     burstTl: 0,
   },
   k: {
+    // /k/ voiceless velar stop.
+    //
+    // Why it was sounding like "hxya":
+    //   1. AH=0.6 aspiration was going through the cascade
+    //      whose F2=2000, F3=2500 are /j/ palatal-locus
+    //      values → aspiration came out as /j/-flavored
+    //      noise.
+    //   2. Cascade bandwidths during closure were narrow
+    //      (150-200 Hz) → high-Q resonance ringing through
+    //      the closure → audible /j/ formants.
+    //   3. Release noise sustained for 100+ms due to linear
+    //      keyframe interpolation → /kʰ → /j/-tinted noise
+    //      → vowel. Should be /k/-burst-snap then vowel.
+    //
+    // Fixes:
+    //   1. Cascade bandwidths widened to damp closure +
+    //      burst formant ringing.
+    //   2. AH dropped to 0.15 (mild aspiration only) so
+    //      the cascade contribution is quiet.
+    //   3. Parallel-bank AF dominates the burst with the
+    //      proper velar pinch peak at 2200 Hz.
+    //   4. Trajectory builder now decays burst AF fast for
+    //      consonants with burstSource — sustained noise
+    //      no longer rings on.
     cascade: [
-      { freq: 200, bw: 200 },
-      { freq: 2000, bw: 150 },
-      { freq: 2500, bw: 200 },
-      { freq: 3500, bw: 250 },
-      { freq: 4500, bw: 300 },
+      { freq: 200, bw: 400 },
+      { freq: 2000, bw: 400 }, // damped during closure
+      { freq: 2500, bw: 400 }, // damped during closure
+      { freq: 3500, bw: 500 },
+      { freq: 4500, bw: 500 },
     ],
     parallel: makeParallelBank({
-      // /k/ burst: compact mid-frequency
-      f3: 2300, a3: 0.7,
-      f4: 3000, a4: 0.5,
+      // Velar burst: COMPACT peak at the F2+F3 pinch
+      // around 2000-2500 Hz. Stronger than before so the
+      // burst is identifiable.
+      f2: 2000, a2: 0.65,
+      f3: 2300, a3: 0.85,
+      f4: 3000, a4: 0.55,
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
+    noiseType: 'obstacle',
     source: SILENT_SOURCE,
     tl: 0,
     holdDuration: 0.10,
-    releaseDuration: 0.025,
-    transitionDuration: 0.08,
+    releaseDuration: 0.015,
+    transitionDuration: 0.06,
     burstSource: {
       av: 0,
       avs: 0,
-      ah: 0.6,
-      af: 0.85,
+      // Mild aspiration — was 0.6, way too loud through
+      // the cascade's vowel-locus formants.
+      ah: 0.15,
+      // Strong frication through the parallel bank where
+      // the velar burst spectrum lives.
+      af: 0.95,
       ab: 0,
       an: 0,
     },
@@ -351,6 +443,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0.4, avs: 0, ah: 0, af: 0, ab: 0, an: 0 },
     tl: 12,
     holdDuration: 0.07,
@@ -368,28 +462,37 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
   },
   d: {
     cascade: [
+      // /d/ closure: voice bar at F1, all higher formants
+      // heavily damped (the tract is closed, can't ring).
       { freq: 250, bw: 100 },
-      { freq: 1800, bw: 150 },
-      { freq: 2700, bw: 200 },
-      { freq: 3600, bw: 250 },
-      { freq: 4800, bw: 300 },
+      { freq: 1800, bw: 400 },
+      { freq: 2700, bw: 400 },
+      { freq: 3600, bw: 500 },
+      { freq: 4800, bw: 500 },
     ],
     parallel: makeParallelBank({
-      f4: 4000, a4: 0.5,
-      f5: 5500, a5: 0.5,
+      // /d/ burst: brief broadband transient with mild
+      // high-frequency bias. NOT a sibilant peak.
+      f3: 2700, a3: 0.4,
+      f4: 4000, a4: 0.3,
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
+    noiseType: 'obstacle',
     source: { av: 0.4, avs: 0, ah: 0, af: 0, ab: 0, an: 0 },
     tl: 12,
     holdDuration: 0.08,
-    releaseDuration: 0.020,
-    transitionDuration: 0.07,
+    // VERY short burst window. Real /d/ release is 5-15 ms.
+    releaseDuration: 0.010,
+    transitionDuration: 0.06,
     burstSource: {
       av: 0.7,
       avs: 0,
       ah: 0.05,
-      af: 0.5,
+      // Burst noise must NOT sustain. Lower af than before.
+      af: 0.35,
       ab: 0,
       an: 0,
     },
@@ -397,23 +500,33 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
   },
   g: {
     cascade: [
+      // /g/ closure: voice bar at F1, all higher formants
+      // heavily damped. The previous narrow F2=2000 was
+      // making the closure sound like /j/ (palatal
+      // approximant has F2=2300).
       { freq: 250, bw: 100 },
-      { freq: 2000, bw: 150 },
-      { freq: 2500, bw: 200 },
-      { freq: 3500, bw: 250 },
-      { freq: 4500, bw: 300 },
+      { freq: 2000, bw: 500 },
+      { freq: 2500, bw: 500 },
+      { freq: 3500, bw: 500 },
+      { freq: 4500, bw: 500 },
     ],
     parallel: makeParallelBank({
-      f3: 2300, a3: 0.55,
-      f4: 3000, a4: 0.4,
+      // Velar burst: COMPACT mid-frequency peak — F2+F3
+      // pinch around 2000-2300 Hz (Stevens 1998 §9.4).
+      f2: 2000, a2: 0.5,
+      f3: 2300, a3: 0.65,
+      f4: 3000, a4: 0.35,
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
-    source: { av: 0.4, avs: 0, ah: 0, af: 0, ab: 0, an: 0 },
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
+    noiseType: 'obstacle',
+    source: { av: 0.3, avs: 0, ah: 0, af: 0, ab: 0, an: 0 },
     tl: 12,
     holdDuration: 0.08,
-    releaseDuration: 0.025,
-    transitionDuration: 0.07,
+    releaseDuration: 0.015,
+    transitionDuration: 0.06,
     burstSource: {
       av: 0.7,
       avs: 0,
@@ -436,6 +549,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     parallel: makeParallelBank({ f3: 2800, a3: 0.7, f4: 3500, a4: 0.5 }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: SILENT_SOURCE,
     tl: 0,
     holdDuration: 0.08,
@@ -455,6 +570,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     parallel: makeParallelBank({ f3: 2800, a3: 0.4 }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0.4, avs: 0, ah: 0, af: 0, ab: 0, an: 0 },
     tl: 12,
     holdDuration: 0.07,
@@ -475,6 +592,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     parallel: makeParallelBank({ f2: 1500, a2: 0.6, f3: 2200, a3: 0.5 }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: SILENT_SOURCE,
     tl: 0,
     holdDuration: 0.08,
@@ -495,6 +614,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     parallel: makeParallelBank({}),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: SILENT_SOURCE,
     tl: 0,
     holdDuration: 0.06,
@@ -519,6 +640,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     parallel: makeParallelBank({}),
     nasalPole: { freq: 270, bw: 100 },
     nasalZero: { freq: 750, bw: 100 }, // long oral side branch
+    nasalPole2: { freq: 950, bw: 100 },
+    nasalZero2: { freq: 1400, bw: 120 },
     source: { av: 0.8, avs: 0, ah: 0, af: 0, ab: 0, an: 0.9 },
     tl: 6,
     holdDuration: 0.10,
@@ -536,6 +659,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     parallel: makeParallelBank({}),
     nasalPole: { freq: 270, bw: 100 },
     nasalZero: { freq: 1450, bw: 150 }, // shorter oral side branch
+    nasalPole2: { freq: 950, bw: 100 },
+    nasalZero2: { freq: 2500, bw: 200 },
     source: { av: 0.8, avs: 0, ah: 0, af: 0, ab: 0, an: 0.9 },
     tl: 6,
     holdDuration: 0.10,
@@ -554,6 +679,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     parallel: makeParallelBank({}),
     nasalPole: { freq: 270, bw: 100 },
     nasalZero: { freq: 2900, bw: 200 }, // very short side branch → high zero
+    nasalPole2: { freq: 950, bw: 100 },
+    nasalZero2: { freq: 5500, bw: 200 }, // parked HF, no second zero
     source: { av: 0.8, avs: 0, ah: 0, af: 0, ab: 0, an: 0.9 },
     tl: 6,
     holdDuration: 0.10,
@@ -572,6 +699,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     parallel: makeParallelBank({}),
     nasalPole: { freq: 270, bw: 100 },
     nasalZero: { freq: 2100, bw: 180 },
+    nasalPole2: { freq: 950, bw: 100 },
+    nasalZero2: { freq: 3500, bw: 200 },
     source: { av: 0.8, avs: 0, ah: 0, af: 0, ab: 0, an: 0.9 },
     tl: 6,
     holdDuration: 0.10,
@@ -590,6 +719,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     parallel: makeParallelBank({}),
     nasalPole: { freq: 270, bw: 100 },
     nasalZero: { freq: 850, bw: 100 },
+    nasalPole2: { freq: 950, bw: 100 },
+    nasalZero2: { freq: 1600, bw: 140 },
     source: { av: 0.8, avs: 0, ah: 0, af: 0, ab: 0, an: 0.9 },
     tl: 6,
     holdDuration: 0.10,
@@ -617,6 +748,9 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
+    noiseType: 'obstacle',
     source: { av: 0, avs: 0, ah: 0, af: 0.95, ab: 0, an: 0 },
     tl: 0,
     holdDuration: 0.14,
@@ -638,8 +772,12 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
+    noiseType: 'obstacle',
     source: { av: 0.4, avs: 0.4, ah: 0, af: 0.7, ab: 0, an: 0 },
     tl: 6,
+    voiceQuality: 'lax',
     holdDuration: 0.12,
     releaseDuration: 0.035,
     transitionDuration: 0.05,
@@ -662,6 +800,9 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
+    noiseType: 'obstacle',
     source: { av: 0, avs: 0, ah: 0, af: 0.9, ab: 0, an: 0 },
     tl: 0,
     holdDuration: 0.14,
@@ -683,13 +824,22 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
+    noiseType: 'obstacle',
     source: { av: 0.4, avs: 0.4, ah: 0, af: 0.65, ab: 0, an: 0 },
     tl: 6,
+    voiceQuality: 'lax',
     holdDuration: 0.12,
     releaseDuration: 0.035,
     transitionDuration: 0.05,
   },
   f: {
+    // /f/ voiceless labiodental.
+    // KEY: no front cavity (constriction IS at the lips),
+    // so no spectral peak. /f/ should sound QUIET and
+    // SOFT, not like TV static. Real /f/ is among the
+    // quietest fricatives, ~15 dB below /s/.
     cascade: [
       { freq: 400, bw: 200 },
       { freq: 1200, bw: 250 },
@@ -698,18 +848,22 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
       { freq: 4500, bw: 400 },
     ],
     parallel: makeParallelBank({
-      // /f/ has no front cavity — broadband weak noise
-      f2: 1500, a2: 0.2,
-      f3: 2500, a3: 0.3,
-      f4: 3500, a4: 0.35,
-      f5: 4800, a5: 0.3,
-      f6: 6000, a6: 0.2,
+      // Gentle bump in the low-mid where the oral cavity
+      // behind the constriction has its first resonance.
+      // Otherwise quiet broadband.
+      f2: 1500, a2: 0.20,
+      f3: 2500, a3: 0.18,
+      f4: 3500, a4: 0.15,
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
-    source: { av: 0, avs: 0, ah: 0, af: 0.5, ab: 0, an: 0 },
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
+    // Much lower af than sibilants — /f/ is quiet.
+    source: { av: 0, avs: 0, ah: 0, af: 0.28, ab: 0, an: 0 },
     tl: 0,
-    holdDuration: 0.14,
+    // Compensate quietness with longer duration.
+    holdDuration: 0.18,
     releaseDuration: 0.040,
     transitionDuration: 0.05,
   },
@@ -728,14 +882,22 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0.5, avs: 0.5, ah: 0, af: 0.4, ab: 0, an: 0 },
     tl: 6,
+    voiceQuality: 'lax',
     holdDuration: 0.12,
     releaseDuration: 0.035,
     transitionDuration: 0.05,
   },
   T: {
-    // /θ/ dental
+    // /θ/ voiceless dental ("th" as in "think").
+    // KEY: "slit" fricative, NOT a "groove" fricative.
+    // Noise is DIFFUSE — spread broadly across 1-8 kHz
+    // with NO strong peak. Much weaker than sibilants
+    // /s/ or /ʃ/. Previous params had a peak at 5.5-7 kHz
+    // which made it sound like /s/.
     cascade: [
       { freq: 400, bw: 200 },
       { freq: 1500, bw: 250 },
@@ -744,37 +906,54 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
       { freq: 4500, bw: 400 },
     ],
     parallel: makeParallelBank({
-      // /θ/ — broader high-frequency, weaker than /s/
-      f4: 4000, a4: 0.35,
-      f5: 5500, a5: 0.45,
-      f6: 7000, a6: 0.4,
+      // Diffuse broadband — gentle bumps across the
+      // whole spectrum, no spectral focus.
+      f2: 1500, a2: 0.18,
+      f3: 2500, a3: 0.22,
+      f4: 4000, a4: 0.25,
+      f5: 5500, a5: 0.25,
+      f6: 7000, a6: 0.20,
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
-    source: { av: 0, avs: 0, ah: 0, af: 0.5, ab: 0, an: 0 },
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
+    // Lower af than sibilants — /θ/ is one of the
+    // QUIETEST fricatives.
+    source: { av: 0, avs: 0, ah: 0, af: 0.40, ab: 0, an: 0 },
     tl: 0,
-    holdDuration: 0.14,
+    holdDuration: 0.16,
     releaseDuration: 0.040,
     transitionDuration: 0.05,
   },
   D: {
-    // /ð/ dental voiced
+    // /ð/ voiced dental ("th" as in "this").
+    // KEY: voicing-dominant. Most of /ð/'s energy is in
+    // the periodic source (under 1 kHz). Noise is VERY
+    // weak and diffuse. Previous params had noise at /z/
+    // frequencies (4-5 kHz) which made it sound like /z/.
     cascade: [
-      { freq: 400, bw: 150 },
-      { freq: 1500, bw: 200 },
-      { freq: 2700, bw: 250 },
+      { freq: 400, bw: 100 },
+      { freq: 1500, bw: 150 },
+      { freq: 2700, bw: 200 },
       { freq: 3500, bw: 300 },
       { freq: 4500, bw: 350 },
     ],
     parallel: makeParallelBank({
-      f4: 4000, a4: 0.2,
-      f5: 5500, a5: 0.3,
+      // Very faint diffuse noise, no peak.
+      f3: 2500, a3: 0.12,
+      f4: 4000, a4: 0.12,
+      f5: 5500, a5: 0.10,
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
-    source: { av: 0.5, avs: 0.5, ah: 0, af: 0.35, ab: 0, an: 0 },
-    tl: 6,
-    holdDuration: 0.12,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
+    // Voicing dominant: AV high, AF very low.
+    source: { av: 0.75, avs: 0.2, ah: 0, af: 0.18, ab: 0, an: 0 },
+    tl: 8,
+    voiceQuality: 'lax',
+    holdDuration: 0.08,
     releaseDuration: 0.035,
     transitionDuration: 0.05,
   },
@@ -794,6 +973,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0, avs: 0, ah: 0.2, af: 0.55, ab: 0, an: 0 },
     tl: 4,
     holdDuration: 0.14,
@@ -815,6 +996,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0.5, avs: 0.5, ah: 0, af: 0.3, ab: 0, an: 0 },
     tl: 8,
     holdDuration: 0.12,
@@ -836,6 +1019,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0, avs: 0, ah: 0.15, af: 0.55, ab: 0, an: 0 },
     tl: 5,
     holdDuration: 0.14,
@@ -857,6 +1042,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0, avs: 0, ah: 0.15, af: 0.4, ab: 0, an: 0 },
     tl: 8,
     holdDuration: 0.14,
@@ -877,6 +1064,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0.7, avs: 0.3, ah: 0, af: 0.15, ab: 0, an: 0 },
     tl: 10,
     holdDuration: 0.12,
@@ -899,6 +1088,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0, avs: 0, ah: 0, af: 0.5, ab: 0, an: 0 },
     tl: 0,
     holdDuration: 0.14,
@@ -920,6 +1111,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0.5, avs: 0.5, ah: 0, af: 0.3, ab: 0, an: 0 },
     tl: 6,
     holdDuration: 0.12,
@@ -942,6 +1135,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0, avs: 0, ah: 0, af: 0.4, ab: 0, an: 0 },
     tl: 0,
     holdDuration: 0.14,
@@ -960,6 +1155,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     parallel: makeParallelBank({}),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0.6, avs: 0.4, ah: 0, af: 0.25, ab: 0, an: 0 },
     tl: 6,
     holdDuration: 0.12,
@@ -967,22 +1164,32 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     transitionDuration: 0.05,
   },
   h: {
-    // /h/ — pure aspiration; glottal noise through the
-    // cascade with the FOLLOWING vowel's formants.
+    // /h/ glottal "fricative" — noise from an open glottis
+    // shaped by the tract already in vowel position.
+    // CRITICAL: very quiet, smooth onset (NO abrupt
+    // attack — the previous /h/ sounded like "kha"
+    // because of a hard noise onset). Bandwidths are wide
+    // so the formant structure is gentle, not ringing.
     cascade: [
-      { freq: 500, bw: 300 },
-      { freq: 1500, bw: 350 },
-      { freq: 2500, bw: 400 },
-      { freq: 3500, bw: 400 },
-      { freq: 4500, bw: 400 },
+      { freq: 500, bw: 200 },
+      { freq: 1500, bw: 200 },
+      { freq: 2500, bw: 250 },
+      { freq: 3500, bw: 300 },
+      { freq: 4500, bw: 350 },
     ],
     parallel: makeParallelBank({}),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
-    source: { av: 0, avs: 0, ah: 0.5, af: 0, ab: 0, an: 0 },
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
+    // Quieter aspiration. /h/ is one of the quietest
+    // sounds in speech.
+    source: { av: 0, avs: 0, ah: 0.30, af: 0, ab: 0, an: 0 },
     tl: 0,
-    holdDuration: 0.10,
-    releaseDuration: 0.040,
+    // Longer hold + long transition so /h/ glides smoothly
+    // into the vowel rather than abrupting.
+    holdDuration: 0.08,
+    releaseDuration: 0.080,
     transitionDuration: 0.05,
   },
   // ====================== AFFRICATES ======================
@@ -1002,6 +1209,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: SILENT_SOURCE,
     tl: 0,
     holdDuration: 0.04,
@@ -1025,6 +1234,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0.4, avs: 0, ah: 0, af: 0, ab: 0, an: 0 },
     tl: 12,
     holdDuration: 0.04,
@@ -1048,6 +1259,9 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
+    noiseType: 'obstacle',
     source: SILENT_SOURCE,
     tl: 0,
     holdDuration: 0.04,
@@ -1071,6 +1285,9 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     }),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
+    noiseType: 'obstacle',
     source: { av: 0.4, avs: 0, ah: 0, af: 0, ab: 0, an: 0 },
     tl: 12,
     holdDuration: 0.04,
@@ -1094,6 +1311,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     parallel: makeParallelBank({}),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0.9, avs: 0, ah: 0, af: 0, ab: 0, an: 0 },
     tl: 0,
     holdDuration: 0.07,
@@ -1112,6 +1331,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     parallel: makeParallelBank({}),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0.9, avs: 0, ah: 0, af: 0, ab: 0, an: 0 },
     tl: 0,
     holdDuration: 0.07,
@@ -1130,6 +1351,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     parallel: makeParallelBank({}),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0.9, avs: 0, ah: 0, af: 0, ab: 0, an: 0 },
     tl: 0,
     holdDuration: 0.07,
@@ -1152,6 +1375,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     // Use the nasal pole-zero as a lateral pole-zero pair.
     nasalPole: { freq: 270, bw: 250 }, // weak lateral pole
     nasalZero: { freq: 2500, bw: 250 }, // lateral antiformant
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0.9, avs: 0, ah: 0, af: 0, ab: 0, an: 0.3 },
     tl: 0,
     holdDuration: 0.08,
@@ -1170,6 +1395,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     parallel: makeParallelBank({}),
     nasalPole: { freq: 270, bw: 250 },
     nasalZero: { freq: 2900, bw: 250 },
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0.9, avs: 0, ah: 0, af: 0, ab: 0, an: 0.3 },
     tl: 0,
     holdDuration: 0.08,
@@ -1191,6 +1418,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     parallel: makeParallelBank({}),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0.7, avs: 0, ah: 0, af: 0, ab: 0, an: 0 },
     tl: 4,
     holdDuration: 0.14,
@@ -1209,6 +1438,8 @@ export const KLATT_CONSONANTS: Record<string, KlattConsonantSpec> = {
     parallel: makeParallelBank({}),
     nasalPole: VOWEL_NASAL_POLE,
     nasalZero: VOWEL_NASAL_ZERO,
+    nasalPole2: VOWEL_NASAL_POLE2,
+    nasalZero2: VOWEL_NASAL_ZERO2,
     source: { av: 0.7, avs: 0, ah: 0, af: 0, ab: 0, an: 0 },
     tl: 4,
     holdDuration: 0.14,
@@ -1247,6 +1478,40 @@ KLATT_CONSONANTS.c = KLATT_CONSONANTS.T! // /θ/
 KLATT_CONSONANTS.C = KLATT_CONSONANTS.D! // /ð/
 
 /**
+ * English /ɹ/ (Talk `u$`) — alveolar approximant, NOT
+ * a trill. Defining feature: extremely LOW F3 (~1300 Hz)
+ * with F2 close to F3 (~1200 Hz). This F2-F3 proximity
+ * is the unique acoustic signature of English /r/
+ * (Espy-Wilson 1992; Stevens 1998 §9.3).
+ */
+
+KLATT_CONSONANTS['u$'] = {
+  cascade: [
+    { freq: 330, bw: 70 },   // F1 low
+    { freq: 1260, bw: 90 },  // F2
+    { freq: 1500, bw: 110 }, // F3 — very low, defining /ɹ/ feature
+    { freq: 3500, bw: 200 },
+    { freq: 4500, bw: 200 },
+  ],
+  parallel: [
+    { freq: 1500, bw: 200, amp: 0 },
+    { freq: 2500, bw: 250, amp: 0 },
+    { freq: 3500, bw: 300, amp: 0 },
+    { freq: 4800, bw: 500, amp: 0 },
+    { freq: 6000, bw: 800, amp: 0 },
+  ],
+  nasalPole: { freq: 270, bw: 200 },
+  nasalZero: { freq: 270, bw: 200 },
+  nasalPole2: VOWEL_NASAL_POLE2,
+  nasalZero2: VOWEL_NASAL_ZERO2,
+  source: { av: 0.9, avs: 0, ah: 0, af: 0, ab: 0, an: 0 },
+  tl: 0,
+  holdDuration: 0.06,
+  releaseDuration: 0.060,
+  transitionDuration: 0.04,
+}
+
+/**
  * Build a 4-keyframe trajectory for a CV pair.
  *
  * Keyframes:
@@ -1283,41 +1548,86 @@ export function buildKlattTrajectory(input: {
   const release = spec.burstSource ?? spec.source
   const releaseTl = spec.burstTl ?? spec.tl
 
+  const noiseType = spec.noiseType ?? 'channel'
+
+  // Voice-quality adjustment. 'lax' adds gentle spectral
+  // tilt + a touch of aspiration; 'breathy' adds a lot of
+  // both. Applied to source.tl + source.ah for the hold
+  // and burst frames.
+  const quality = VOICE_QUALITY_ADJUST[spec.voiceQuality ?? 'modal']
+  const tlAdjusted = (base: number) => base + quality.tlAdjust
+  const sourceAdjusted = (s: SourceMix): SourceMix =>
+    quality.ahBoost > 0
+      ? { ...s, ah: Math.min(1, s.ah + quality.ahBoost) }
+      : s
+
   const frames: KlattFrame[] = [
     // Keyframe 0 — closure / hold begins.
     {
       time: t0,
-      source: spec.source,
-      tl: spec.tl,
+      source: sourceAdjusted(spec.source),
+      tl: tlAdjusted(spec.tl),
       cascade: spec.cascade,
       parallel: spec.parallel,
       nasalPole: spec.nasalPole,
       nasalZero: spec.nasalZero,
+      nasalPole2: spec.nasalPole2,
+      nasalZero2: spec.nasalZero2,
+      noiseType,
     },
     // Keyframe 1 — release begins, with burst source.
     {
       time: t1,
-      source: release,
-      tl: releaseTl,
+      source: sourceAdjusted(release),
+      tl: tlAdjusted(releaseTl),
       cascade: spec.cascade,
       parallel: spec.parallel,
       nasalPole: spec.nasalPole,
       nasalZero: spec.nasalZero,
+      nasalPole2: spec.nasalPole2,
+      nasalZero2: spec.nasalZero2,
+      noiseType,
     },
-    // Keyframe 2 — release ends. Formants halfway to vowel.
-    // Source has voicing rising and noise falling.
+    // Keyframe 2 — release ends.
+    //
+    // KEY: For consonants with a burstSource (stops +
+    // affricates), the noise burst must DECAY FAST after
+    // the brief release window — real stop release noise
+    // lasts 5-15 ms, not the 100+ ms of linear decay we
+    // were producing. Source jumps almost all the way to
+    // vowel at this keyframe; only AH (aspiration) lingers
+    // a bit for the VOT window.
+    //
+    // For continuant consonants (fricatives, nasals,
+    // approximants), the source continues to interpolate
+    // smoothly.
     {
       time: t2,
-      source: midSource({ source: release, target: VOWEL_SOURCE, t: 0.5 }),
+      source: spec.burstSource
+        ? {
+            // Stop / affricate: burst noise is gone; keep
+            // a touch of aspiration for VOT; voicing
+            // mostly at vowel level.
+            av: lerp(release.av, VOWEL_SOURCE.av, 0.85),
+            avs: 0,
+            ah: release.ah * 0.4, // brief aspiration tail
+            af: 0, // burst noise OFF
+            ab: 0,
+            an: 0,
+          }
+        : midSource({ source: release, target: VOWEL_SOURCE, t: 0.5 }),
       tl: releaseTl * 0.5,
       cascade: midFormants({
         from: spec.cascade,
         to: vowelTarget.cascade,
-        t: 0.5,
+        t: spec.burstSource ? 0.7 : 0.5, // formants further along for stops
       }),
-      parallel: dampParallel(spec.parallel, 0.3),
+      parallel: dampParallel(spec.parallel, spec.burstSource ? 0.0 : 0.3),
       nasalPole: spec.nasalPole,
       nasalZero: spec.nasalZero,
+      nasalPole2: spec.nasalPole2,
+      nasalZero2: spec.nasalZero2,
+      noiseType,
     },
     // Keyframe 3 — steady vowel.
     {
@@ -1330,6 +1640,9 @@ export function buildKlattTrajectory(input: {
         : dampParallel(spec.parallel, 0),
       nasalPole: VOWEL_NASAL_POLE,
       nasalZero: VOWEL_NASAL_ZERO,
+      nasalPole2: VOWEL_NASAL_POLE2,
+      nasalZero2: VOWEL_NASAL_ZERO2,
+      noiseType: 'channel',
     },
   ]
 
@@ -1375,6 +1688,17 @@ function mixFrames(input: { a: KlattFrame; b: KlattFrame; u: number }): KlattFra
       freq: lerp(a.nasalZero.freq, b.nasalZero.freq, u),
       bw: lerp(a.nasalZero.bw, b.nasalZero.bw, u),
     },
+    nasalPole2: {
+      freq: lerp(a.nasalPole2.freq, b.nasalPole2.freq, u),
+      bw: lerp(a.nasalPole2.bw, b.nasalPole2.bw, u),
+    },
+    nasalZero2: {
+      freq: lerp(a.nasalZero2.freq, b.nasalZero2.freq, u),
+      bw: lerp(a.nasalZero2.bw, b.nasalZero2.bw, u),
+    },
+    // Boolean-style snap: use whichever frame we're closer
+    // to in time. (No "halfway between obstacle and channel".)
+    noiseType: u < 0.5 ? a.noiseType : b.noiseType,
   }
 }
 

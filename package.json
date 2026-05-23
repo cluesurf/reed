@@ -34,5 +34,10 @@
     "tsc-alias": "^1.8.10",
     "typescript": "^5.4.5",
     "vitest": "^2.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

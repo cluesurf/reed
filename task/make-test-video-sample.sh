@@ -152,6 +152,28 @@ echo "[make-test-video-sample] wrote $CONSONANT_VIDEO"
 
 # ===================== Done =======================
 
+# ==================== Hello World ====================
+#
+# Connected-speech demo. Audio comes from a separate task
+# (task/make-hello-world.ts) which produces a single
+# pre-mixed WAV. We just wrap it in an MP4 over a still
+# image.
+
+HELLO_WAV="$TEST_DIR/hello-world.wav"
+HELLO_IMAGE="$TEST_DIR/hello-world.jpg"
+HELLO_VIDEO="$TEST_DIR/hello-world.mp4"
+
+if [[ -f "$HELLO_WAV" ]]; then
+  ensure_image "$HELLO_IMAGE"
+  make_image_video "$HELLO_IMAGE" "$HELLO_WAV" "$HELLO_VIDEO"
+  echo "[make-test-video-sample] wrote $HELLO_VIDEO"
+else
+  echo "[make-test-video-sample] skipping hello-world.mp4 — missing $HELLO_WAV"
+  echo "  Run: tsx task/make-hello-world.ts"
+fi
+
+# ===================== Done =======================
+
 if [[ ${#GENERATED_IMAGES[@]} -gt 0 ]]; then
   echo "[make-test-video-sample] note: these images were auto-generated as black placeholders:"
   for path in "${GENERATED_IMAGES[@]}"; do

@@ -2,7 +2,7 @@
 
 import { Glottis } from '@/synth/glottis'
 import { Tract } from '@/synth/tract'
-import { vowelDiameters, type VowelKey } from '@/synth/vowel-shapes'
+import { vowelDiameters, storyDiameters, type VowelKey } from '@/synth/vowel-shapes'
 import { LipRadiation } from '@/synth/radiation'
 import { SpectralShape } from '@/synth/spectral-shape'
 
@@ -40,6 +40,13 @@ export type SynthesizeVowelInput = {
   tenseness?: number
   /** Number of tract segments. Default 44 (Pink-Trombone-compatible). */
   segments?: number
+  /**
+   * Source of per-vowel tract shape. 'pink-trombone' uses
+   * the hand-tuned cosine-curve formula; 'story' uses
+   * Story 1996 MRI-measured area functions for anatomy-
+   * grounded vowel acoustics. Default 'pink-trombone'.
+   */
+  shapeSource?: 'pink-trombone' | 'story'
 }
 
 /**
@@ -63,7 +70,10 @@ export function synthesizeVowel(input: SynthesizeVowelInput): Float32Array {
 
   const glottis = new Glottis()
   const tract = new Tract({ length: segments })
-  tract.setDiameters(vowelDiameters(input.vowel, segments))
+  const diameters = input.shapeSource === 'story'
+    ? storyDiameters(input.vowel, segments)
+    : vowelDiameters(input.vowel, segments)
+  tract.setDiameters(diameters)
 
   let lcg = 7919
   const nextNoise = () => {
@@ -223,7 +233,7 @@ function buildLowpass(taps: number, cutoff: number): number[] {
 
 export { Glottis } from '@/synth/glottis'
 export { Tract } from '@/synth/tract'
-export { vowelDiameters, type VowelKey } from '@/synth/vowel-shapes'
+export { vowelDiameters, storyDiameters, type VowelKey } from '@/synth/vowel-shapes'
 export { LipRadiation } from '@/synth/radiation'
 export {
   SpectralShape,
@@ -282,3 +292,8 @@ export {
   synthesizeKlattCv,
   type SynthesizeKlattCvInput,
 } from '@/synth/klatt-synth'
+export {
+  synthesizeSequence,
+  type SequencePhone,
+  type SynthesizeSequenceInput,
+} from '@/synth/klatt-sequence'

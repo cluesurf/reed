@@ -30,6 +30,20 @@ export type GlottisConfig = {
   vibratoRateHz?: number
   vibratoDepth?: number
   vibratoWobble?: number
+  /**
+   * Per-cycle period perturbation RMS. Each new glottal
+   * cycle's period is multiplied by (1 + u) where u is
+   * uniform[-jitterRms, +jitterRms]. Natural modal voice:
+   * 0.005 (0.5%). Robotic: 0. Rough/pathological: 0.02+.
+   */
+  jitterRms?: number
+  /**
+   * Per-cycle amplitude perturbation RMS. Each new cycle's
+   * voicing output is multiplied by (1 + u) where u is
+   * uniform[-shimmerRms, +shimmerRms]. Natural modal
+   * voice: 0.03 (3%). Robotic: 0.
+   */
+  shimmerRms?: number
 }
 
 export type GlottisInputs = {
@@ -77,6 +91,18 @@ export class Glottis {
   private readonly vibratoRateHz: number
   private readonly vibratoDepth: number
   private readonly vibratoWobble: number
+  private readonly jitterRms: number
+  private readonly shimmerRms: number
+
+  // Sampled fresh once per glottal cycle. Stay constant
+  // across the in-between samples so the cycle's period +
+  // amplitude are well-defined.
+  private currentJitter = 0
+  private currentShimmer = 0
+
+  // Seeded LCG for deterministic per-cycle jitter +
+  // shimmer (so tests aren't flaky). Reset by reset().
+  private jitterLcg = 0x9e3779b1
 
   /**
    * Set once the first cycle is fired so we don't divide by
@@ -94,6 +120,10 @@ export class Glottis {
     this.vibratoRateHz = config.vibratoRateHz ?? 5.5
     this.vibratoDepth = config.vibratoDepth ?? 0.003
     this.vibratoWobble = config.vibratoWobble ?? 0
+    // Natural modal-voice values per Klatt & Klatt 1990.
+    // See note/library/reed/topics/jitter-and-shimmer.md.
+    this.jitterRms = config.jitterRms ?? 0.005
+    this.shimmerRms = config.shimmerRms ?? 0.03
   }
 
   process(input: GlottisInputs): number {
@@ -121,7 +151,10 @@ export class Glottis {
     }
 
     const f0 = frequency * (1 + vibrato)
-    const period = 1 / Math.max(f0, 1)
+    // Apply per-cycle jitter: lengthens or shortens THIS
+    // cycle's period by ±jitterRms × 100%. Resampled at
+    // each new cycle (below).
+    const period = (1 / Math.max(f0, 1)) * (1 + this.currentJitter)
 
     // Tenseness modulation: small additive noise to keep
     // the timbre alive cycle-to-cycle.
@@ -131,13 +164,18 @@ export class Glottis {
     modulatedTenseness += (3 - modulatedTenseness) * (1 - intensity)
 
     // Cycle bookkeeping. Each period we recompute the LF
-    // coefficients from the (modulated) tenseness.
+    // coefficients from the (modulated) tenseness AND
+    // draw fresh jitter + shimmer samples for the next
+    // cycle. Klatt & Klatt 1990: independent draws
+    // cycle-to-cycle, NOT correlated drift.
     const secondsOffset = seconds - this.startSeconds
     let interpolation = secondsOffset / period
     if (!this.initialized || interpolation >= 1) {
       this.startSeconds = seconds + (secondsOffset % period)
       interpolation = (seconds - this.startSeconds) / period
       this.updateCoefficients(modulatedTenseness)
+      this.currentJitter = this.uniformRandom() * this.jitterRms
+      this.currentShimmer = this.uniformRandom() * this.shimmerRms
       this.initialized = true
     }
     if (interpolation < 0) interpolation = 0
@@ -154,7 +192,14 @@ export class Glottis {
     aspiration *= 1 - Math.sqrt(Math.max(modulatedTenseness, 0))
     aspiration *= 0.02 * this.noise.at(seconds * 1.99) + 0.2
 
-    const voice = this.normalizedWaveform(interpolation) * intensity * loudness
+    // Shimmer multiplies the periodic voicing component
+    // only; aspiration noise is already aperiodic and
+    // doesn't benefit from cycle-to-cycle amplitude scaling.
+    const voice =
+      this.normalizedWaveform(interpolation) *
+      intensity *
+      loudness *
+      (1 + this.currentShimmer)
     return (voice + aspiration) * intensity
   }
 
@@ -209,6 +254,15 @@ export class Glottis {
       return (-Math.exp(-epsilon * (t - Te)) + shift) / Delta
     }
     return E0 * Math.exp(alpha * t) * Math.sin(omega * t)
+  }
+
+  /**
+   * Seeded uniform sample in [-1, +1]. Used for jitter +
+   * shimmer so identical renders produce identical audio.
+   */
+  private uniformRandom(): number {
+    this.jitterLcg = (this.jitterLcg * 1664525 + 1013904223) >>> 0
+    return (this.jitterLcg / 0xffffffff) * 2 - 1
   }
 
   private openPhaseNoiseModulator(t: number): number {
